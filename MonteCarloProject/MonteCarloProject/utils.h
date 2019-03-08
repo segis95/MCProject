@@ -13,9 +13,10 @@ double libor_price(double L_i, double K, double H, double v_i);
 double bern(double p);
 double pos_part(double x);
 double one_simulation(double L_i, double K, double H, double sigma, double h, double i, int mode);
-
+double classical_method(int N, double L_i, double K, double H, double sigma, double h, double i, int mode);
 
 
 extern std::default_random_engine generator;
 extern std::uniform_real_distribution<double> distribution;
+extern std::normal_distribution<double> gauss;
 

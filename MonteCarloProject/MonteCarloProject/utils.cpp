@@ -5,8 +5,7 @@
 #include <ctime>
 #include "utils.h"
 
-#define M_SQRT1_2 sqrt(0.5)
-#define PI 3.141592653589793238463
+
 
 double d_p(double x, double v) {
 	return (log(x) + v * v / 2) / v;
@@ -95,4 +94,63 @@ double one_simulation(double L_i, double K, double H, double sigma, double h, do
 
 	return pos_part(exp(lnL) - K) + Z;
 
+}
+double logn(double x, double sigma, double t) {
+	return exp(-sigma * sigma * t / 2.0 + sigma * x);
+}
+
+double classical_method(int N, double L_i, double K, double H, double sigma, double h, double i, int mode) {
+	
+	int lgth = pow(2, N);
+	std::vector<double> W(lgth + 1);
+	int k;
+	int step;
+
+	double tc = sqrt(i);
+
+	W[0] = 0.0;
+	W[lgth] = gauss(generator) * tc;
+	
+	double Z;
+	int level = lgth;
+
+	for (int j = 1; j < N + 1; j++) {
+		level /= 2;
+		step = level * 2;
+		for (k = level; k < lgth; k = k + step) {
+			Z = gauss(generator) * (sqrt(double(level) / lgth / 2.0) * tc);
+			W[k] = (W[k - level] + W[k + level]) / 2.0 + Z;
+			//std::cout << Z << ' ' << W[k - level] << ' ' << W[k] <<' '<<W[k + level] << '\n';
+
+		}
+	}
+
+	//return W[1];
+	double max = 0.0;
+	double delta = 1.0 / lgth; 
+	
+	double multiplier = 1.0;
+	for (int j = lgth; j >= 0; j--) {
+		W[j] = L_i * logn(W[j], sigma, i * delta * j);
+		
+		if (W[j] > max) {
+			max = W[j];
+			//std::cout << max << '\n'; 
+		}
+		if (j < lgth) {
+			multiplier *= (1.0 - exp(-2.0 * double(lgth) / (i * sigma * sigma) * \
+				(W[j] - H) * (W[j + 1] - H))) ;
+		}
+	}
+	//return W[lgth];
+	//std::cout << multiplier << '\n';
+	if (max < H) {
+		if (mode == 0)
+			return W[lgth] - K > 0.0 ? (W[lgth] - K) * multiplier : 0.0;
+		else
+			return W[lgth] - K > 0.0 ? (W[lgth] - K) : 0.0;
+	}
+	else
+		//std::cout << 1;
+		return 0.0;
 }
