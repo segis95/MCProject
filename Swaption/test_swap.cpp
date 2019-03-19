@@ -19,7 +19,7 @@ int main(void){
     double beta = 0.1;
     double delta = 1.0;
     double sigma = 0.1;
-    double h = 0.1;
+    double h = 0.25;
     double R_up = 0.075;
     double K = 0.01;
     double* T = new double[N];
@@ -89,7 +89,7 @@ int main(void){
     }
     double actualisation = 1 / pow(1.05,10);
     std::ofstream record("test.txt");
-    int num_traj = 10000;
+    int num_traj = 1000000;
     auto start = std::chrono::high_resolution_clock::now();
     monte_carlo(num_traj, log_L, U, Rho, R_up, delta, sigma, h, N, T[0], actualisation, K,record);
     auto end = std::chrono::high_resolution_clock::now();

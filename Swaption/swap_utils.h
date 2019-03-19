@@ -16,6 +16,8 @@ struct args{
 };
 
 typedef struct outCome{
+    int projection_num;
+    double projection_time;
     double timeStamp;
     alglib::real_1d_array logL;
 } outCome;
@@ -30,7 +32,7 @@ void print_Matrix(alglib::real_2d_array Mat, int M, int N);
 void get_U(alglib::real_2d_array& U, double beta, double* T, int N);
 
 // calculate R_swap
-double R_Swap(alglib::real_1d_array& log_L, double delta, int N);
+double R_Swap(alglib::real_1d_array& log_L, double delta, int N, bool isLog=true);
 
 // generate one random variable following bernouill law
 double get_Bern(double p);
@@ -47,9 +49,8 @@ void jump_Back(alglib::real_1d_array& log_L, alglib::real_1d_array& proj_logL, i
 // generate randomStep vector for one step simulatioin
 void get_RandomStep(alglib::real_1d_array& randomStep, double p, int N);
 
-
 // do one update 
-void one_Simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N);
+void one_Simulation(alglib::real_1d_array& log_L, alglib::real_1d_array& L_, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N);
 
 // auxilliary function for first test
 double get_MaxlogL(alglib::real_1d_array& log_L, int N);
@@ -62,10 +63,10 @@ void fonction_fvec(const alglib::real_1d_array& x, alglib::real_1d_array& fi, vo
 alglib::real_1d_array projection(alglib::real_1d_array& proj_X, void (*fvec)(const alglib::real_1d_array &x, alglib::real_1d_array &fi, void *ptr), void *ptr);
 
 // test follows equation (44)
-bool second_Test(alglib::real_1d_array& log_L, int N, double sigma, double h, double delta, double R_up);
+bool second_Test(alglib::real_1d_array& log_L, alglib::real_1d_array& L, int N, double sigma, double h, double delta, double R_up);
 
 // simulation
-void simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording);
+// void simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording);
 // simulation with 2 test and projection
 outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording=true);
 
