@@ -2,5 +2,5 @@
 creation
 
 # Swaption
-### Calculate Barrier Swaption by Monte-Carlo methode
+### Calculate Barrier Swaption by Monte-Carlo method
 Compilation command : g++ -I. -o swap.out *.cpp
