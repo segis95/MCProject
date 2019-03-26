@@ -24,13 +24,16 @@ __constant__ float Cg[16*(nt-1)*(nk-1)];
 __constant__ float Kgmax = 250.f;
 __constant__ float Kgmin = 20.f;
 __constant__ float K = 100.f;
+__constant__ int P1 = 2;
+__constant__ int P2 = 8;
+__constant__ float B = 120.f;
 // we should define the maturity here 
 // since the interest rate defined in rg has max time about 3 years, so we define maturity as 3 years
 // so that in our simulation, all time steps has a defined interest rate
 __constant__ float T = 3.f;
 __constant__ float delta_T = T / L;
-__constant__ float delta_X = (Kgmax-Kgmin) / N;
-// prefixed date correspond to maturity T = 3
+__constant__ float delta_X = (log(Kgmax)-log(Kgmin)) / N;// ATTENTION: X is log
+// prefixed dates correspond to maturity T = 3
 __constant__ float T[M] = {0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7};
 
 __device__ bool is_synchronized[L];
@@ -87,7 +90,7 @@ void FreeVar()
 }
 
 
-double Max(double X, double Y){
+float Max(float X, float Y){
 	return X < Y ? X : Y;
 }
 // Initialize all parameters
@@ -102,19 +105,23 @@ void parameters()
 		synchro_count_c[i] = 0;
 	}
 	for(int i = 0; i < M*N; i++){
-		Bsc[i] = 0.0;
-		Ysc[i] = 0.0;
+		Bsc[i] = 0.f;
+		Ysc[i] = 0.f;
 	}
 	// initialization all Z to terminal condition
 	for(int i = 0; i < N; i++){
-		for(int j=0; j< M; j++){
-			double x = Kgmin + i * delta_X;
-			Zsc[i + j * N] = Max(exp(x) - K,0.0);
+		for(int j= 0; j < M; j++){
+			if(j < p1 || j > p2){
+				Zsc[i + j * N] = 0.f;
+			}else{
+				double x = log(Kgmin) + i * delta_X;
+				Zsc[i + j * N] = Max(exp(x) - K,0.f);
+			}
 		}
 	}
 	for(int i = 0; i < M*(N-1); i++){
-		Asc[i] = 0.0;
-		Csc[i] = 0.0;
+		Asc[i] = 0.f;
+		Csc[i] = 0.f;
 	}
 
 	cudaMemcpyToSymbol(is_synchronized, is_synchronized_c, L*sizeof(bool));
@@ -314,7 +321,7 @@ __global__ void thomasKernel(double *Zs, double *As, double *Bs, double *Cs, dou
 
 }
 
-
+// function to get interest rate which is in rgc defined by prof
 __device__ float get_rgc(){
 	// we should use Rgc table to get the real interest rate, however the way that the prof presents it is complicate for 
 	// extracting interest rate, we set it to zero for the moment
@@ -328,9 +335,10 @@ __device__ int which_Schema(int tStep){
 	if(t == T[M-2]){
 		return 1;// use eq before 10
 	}else{
-		for(int i = 3; i <= M; i++){
+		for(int k = 3; k <= M; k++){
 			if(t == T[M-i]){
-				return 2;// use eq(10)
+				return k;// use eq(10) k stands for the k + 1 in eq(10)
+				// ATTENTION: the index of T[] starts from 1 in the definition of the prof while here it starts from 0
 			}
 		}
 		return 0;// normal 
@@ -338,6 +346,66 @@ __device__ int which_Schema(int tStep){
 
 }
 
+__device__ float One_Zero(float X, float B, bool up){
+	// play the role of indicatrice in (10) and eq before (10)
+	// up means all values >= B are kept, vice versa
+	if(up){
+		return X < B ? 0.f : X;
+	}else{
+		return X < B ? X : 0.f;
+	}
+}
+
+// update Ys by Schema0 (which means E[(S_T - K)_+|S_t])
+__device__ void Update_by_Schema0(){
+	int idx = threadIdx.x + (blockIdx.x - 1);
+	if (blockIdx.x > P2 || blockIdx.x < P1){
+		// if 
+		Ys[idx] = 0;
+	}
+	if(x >= log(Kgmax)){
+		// upper boundary
+		float pmax = Kgmax - K;
+		// when touches upper boundary, As[idx+1] is set to be As[idx]
+		Ys[idx] = - As[idx-1] * Zs[idx-1] + (2 - As[idx]) * Zs[idx] + (- As[idx]) * pmax;
+	}else{
+		if(x <= log(Kgmin)){
+			// lower boundary
+			float pmin = 0
+			Ys[idx] = - As[idx] * pmin + (2 - As[idx]) * Zs[idx] + (- As[idx+1]) * Zs[idx+1];
+		}
+		else{
+			// in the middle
+			Ys[idx] = - As[idx-1] * Zs[idx-1] + (2 - As[idx]) * Zs[idx] + (- As[idx+1]) * Zs[idx+1];
+		}
+		return;
+}
+
+// update Ys by Schema1 (which means just with indicatrice, not the one with the sum two indicatrice
+__device__ void Update_by_Schema1(bool up){
+	int idx = threadIdx.x + (blockIdx.x - 1);
+	if(x >= log(Kgmax)){
+		// upper boundary
+		float pmax = Kgmax - K;
+		// when touches upper boundary, As[idx+1] is set to be As[idx]
+		Ys[idx] = - As[idx-1] * One_Zero(Zs[idx-1],B) + (2 - As[idx]) * One_Zero(Zs[idx],B) + (- As[idx]) * One_Zero(pmax,B);
+	}else{
+		if(x <= log(Kgmin)){
+			// lower boundary
+			float pmin = 0
+			Ys[idx] = - As[idx] * One_Zero(pmin,B) + (2 - As[idx]) * One_Zero(Zs[idx],B) + (- As[idx+1] ) * One_Zero(Zs[idx+1],B);
+		}
+		else{
+			// in the middle
+			Ys[idx] = - As[idx-1] * One_Zero(Zs[idx-1],B) + (2 - As[idx]) * One_Zero(Zs[idx],B) + (- As[idx+1]) * One_Zero(Zs[idx+1],B);
+		}
+		return;
+}
+
+// update Ys by Schema3 (which means the one in eq(10) with the sum of two indicatrice
+__device__ void Update_by_Schema2(){
+	// TODO
+}
 
 __device__ void Update_Ys(int tStep, int N){
 	// Ys is the right part of the recursive equation
@@ -352,33 +420,33 @@ __device__ void Update_Ys(int tStep, int N){
 	// pu = - qu
 	// *********************************************************************************
 	int schema = which_Schema(tStep);
-	int idx = threadIdx.x + (blockIdx.x - 1);
-	float x = Kgmin + delta_X * threadIdx.x;
+
 	if(schema == 0 ){
-		if(x >= log(Kgmax)){
-			// upper boundary
-			// TODO
-			float pmax = Kgmax - K;
-			// Ys[idx] = - As[idx-1] * Zs[idx-1] + (2 - As[idx]) * Zs[idx] +
-		}else{
-			if(x <= log(Kgmin)){
-				// lower boundary
-				// TODO
-				float pmin = 0
-				// Ys[idx] = ... + (2 - As[idx]) * Zs[idx] + (- As[idx])
-			}
-			else{
-				// in the middle
-				// TODO
-				// Ys[idx] = - As[idx-1] * Zs[idx-1] + (2 - As[idx]) * Zs[idx] + (- As[idx+1]) * Zs[idx+1]
-			}
-		}
+		Update_by_Schema0();
 	}
 	if(schema == 1){
-		// TODO
+		if(blockIdx.x == P2 || blockIdx.x == (P1 - 1)){
+			bool up = true;
+			if(blockIdx.x == (P1 -1)){
+				up = false;
+			}
+			Update_by_Schema1(up);
+		}else{
+			Update_by_Schnema1();
+		}
 	}
-	if(schema == 2){
-		// TODO
+	if(schema >= 2){
+		int k = schema + 1;
+		int Pk = Max(P1 - k, 0);
+		if(blockIdx.x == P2 || blockIdx.x == (PK-1)){
+			bool up = true;
+			if(blockIdx.x == (Pk-1)){
+				up = false;
+			}
+			Update_by_Schema1(up);
+		}esle{
+			Update_by_Shcema2();
+		}
 	}
 }
 
