@@ -1,6 +1,11 @@
 # MCProject
-creation
+# Barrier Cap/Floor
 
-# Swaption
+# Barrier Swaption
 ### Calculate Barrier Swaption by Monte-Carlo method
-Compilation command : g++ -I. -o swap.out *.cpp
+Don't need to do anything, just go into the directory of Swaption then type the compilation command
+Compilation command : 
+g++ -I. -o swap.out *.cpp
+
+The code print out the price and runing time at the terminal screen.
+As output, you are going the expect a file which stores the exit time and the result of each simulation per discretization step.
