@@ -15,6 +15,7 @@ swap_utils.cpp : all functions need for the Barrier Swaption
 
 test_swap.cpp : main function for the Barrier Swaption
 
+All other files are form alglib, they are used for the optimization procedure in the algorithm.
 
-The code print out the price and runing time at the terminal screen.
+The code prints out the prices and runing times for each discretization step at the terminal screen.
 As output, you are going the expect a file which stores the exit time and the result of each simulation per discretization step.
