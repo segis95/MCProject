@@ -16,8 +16,6 @@ struct args{
 };
 
 typedef struct outCome{
-    int projection_num;
-    double projection_time;
     double timeStamp;
     alglib::real_1d_array logL;
 } outCome;
@@ -32,10 +30,12 @@ void print_Matrix(alglib::real_2d_array Mat, int M, int N);
 void get_U(alglib::real_2d_array& U, double beta, double* T, int N);
 
 // calculate R_swap
-double R_Swap(alglib::real_1d_array& log_L, double delta, int N, bool isLog=true);
+double R_Swap(alglib::real_1d_array& log_L, double delta, int N);
 
 // generate one random variable following bernouill law
 double get_Bern(double p);
+
+double get_Gaussian(double mean, double std);
 
 // get norm , q specifies the order of the norm
 double get_Norm(alglib::real_1d_array& proj_logL, alglib::real_1d_array& log_L, int N, int q = 2);
@@ -47,10 +47,11 @@ double get_p(double norm, int N, double h,double sigma);
 void jump_Back(alglib::real_1d_array& log_L, alglib::real_1d_array& proj_logL, int N, double h, double sigma);
 
 // generate randomStep vector for one step simulatioin
-void get_RandomStep(alglib::real_1d_array& randomStep, double p, int N);
+void get_RandomStep(alglib::real_1d_array& randomStep, double p, int N, bool normal = false);
+
 
 // do one update 
-void one_Simulation(alglib::real_1d_array& log_L, alglib::real_1d_array& L_, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N);
+void one_Simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, bool normal=false);
 
 // auxilliary function for first test
 double get_MaxlogL(alglib::real_1d_array& log_L, int N);
@@ -63,12 +64,19 @@ void fonction_fvec(const alglib::real_1d_array& x, alglib::real_1d_array& fi, vo
 alglib::real_1d_array projection(alglib::real_1d_array& proj_X, void (*fvec)(const alglib::real_1d_array &x, alglib::real_1d_array &fi, void *ptr), void *ptr);
 
 // test follows equation (44)
-bool second_Test(alglib::real_1d_array& log_L, alglib::real_1d_array& L, int N, double sigma, double h, double delta, double R_up);
+bool second_Test(alglib::real_1d_array& log_L, int N, double sigma, double h, double delta, double R_up);
 
 // simulation
-// void simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording);
+void simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording);
 // simulation with 2 test and projection
-outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording=true);
+outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording=true, bool normal = false);
+// simulation without projection
+outCome real_simulation_without_projection(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording=true, bool normal=false);
+// simulation by simple MC method
+outCome real_simulation_simple_MC(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal);
+// simulation by Brownian Bridge method
+outCome real_simulation_MCB(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal);
+
 
 // libor to zero coupon
 alglib::real_1d_array get_zeroCoupon(alglib::real_1d_array& log_L, int N, double delta);
@@ -76,7 +84,9 @@ alglib::real_1d_array get_zeroCoupon(alglib::real_1d_array& log_L, int N, double
 double get_Price(alglib::real_1d_array& zeroCoupon, double Rswap, double K, double delta, int N);
 
 // monte carlo
-void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, bool is_Recording=true);
+void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, bool is_Recording=true, bool normal = false);
+//
+void monte_carlo_func(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, outCome (*simu) (alglib::real_1d_array&, alglib::real_2d_array&, alglib::real_2d_array&, double, double, double, double, int, double, int, std::ofstream&, bool, bool),bool is_Recording=false,bool normal = false);
 
 // 
 void print_logL(alglib::real_1d_array& log_L, int N);

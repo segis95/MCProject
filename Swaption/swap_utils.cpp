@@ -2,7 +2,6 @@
 #include <fstream>
 #include <vector>
 #include <random>
-#include <chrono>
 #include "swap_utils.h"
 #include "linalg.h"
 #include <math.h>
@@ -47,52 +46,38 @@ void get_U(alglib::real_2d_array& U, double beta, double* T, int N){
     return;
 }
 
-double R_Swap(alglib::real_1d_array& log_L, double delta, int N, bool isLog){
-    //  get swap rate from log Libor rates
-    //  we R_swap can either have log_Libor or Libor controled by isLog
-    if(isLog){
-        alglib::real_1d_array L_;
-        L_.setlength(N);
-        for(int i = 0; i < N; i++){
-            L_[i] = exp(log_L[i]);
-        }
-
-        double num = 1.0;
-        for(int j = 0; j < N; j++){
-            num *= (1 + delta * L_[j]);
-        }
-        num = 1.0 - 1.0 / num;
-        double den = 0.0;
-        for(int i = 0; i < N; i++){
-            double temp = 1.0;
-            for(int j = 0; j <= i; j++){
-                temp *= (1 + delta * L_[j]);
-            }
-            den += 1/temp;
-        }
-        den *= delta;
-        return (num/den);
-    }else{
-        double num = 1.0;
-        for(int j = 0; j < N; j++){
-            num *= (1 + delta * log_L[j]);
-        }
-        num = 1.0 - 1.0 / num;
-        double den = 0.0;
-        for(int i = 0; i < N; i++){
-            double temp = 1.0;
-            for(int j = 0; j <= i; j++){
-                temp *= (1 + delta * log_L[j]);
-            }
-            den += 1/temp;
-        }
-        den *= delta;
-        return (num/den);
+double R_Swap(alglib::real_1d_array& log_L, double delta, int N){
+    //get swap rate from log Libor rates
+    alglib::real_1d_array L_;
+    L_.setlength(N);
+    for(int i = 0; i < N; i++){
+        L_[i] = exp(log_L[i]);
     }
+
+    double num = 1.0;
+    for(int j = 0; j < N; j++){
+        num *= (1 + delta * L_[j]);
+    }
+    num = 1.0 - 1.0 / num;
+    double den = 0.0;
+    for(int i = 0; i < N; i++){
+        double temp = 1.0;
+        for(int j = 0; j <= i; j++){
+            temp *= (1 + delta * L_[j]);
+        }
+        den += 1/temp;
+    }
+    den *= delta;
+    return (num/den);
 }
 
 double get_Bern(double p){
     return distribution(generator) < p ? -1.0 : 1.0;
+}
+
+double get_Gaussian(double mean, double std){
+    std::normal_distribution<double> gaussian(mean,std);
+    return gaussian(generator);
 }
 
 double get_Norm(alglib::real_1d_array& proj_logL, alglib::real_1d_array& log_L, int N, int q){
@@ -119,18 +104,26 @@ void jump_Back(alglib::real_1d_array& log_L, alglib::real_1d_array& proj_logL, i
     return;
 }
 
-void get_RandomStep(alglib::real_1d_array& randomStep, double p, int N){
+void get_RandomStep(alglib::real_1d_array& randomStep, double p, int N, bool normal){
     for(int i = 0; i < N; i++){
-        randomStep[i] = get_Bern(p);
+        if(!normal){
+            randomStep[i] = get_Bern(p);
+        }else{
+            randomStep[i] = get_Gaussian(0,1);
+        }
     }
     return;
 }
 
-void one_Simulation(alglib::real_1d_array& log_L, alglib::real_1d_array& L_,alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N){
+void one_Simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, bool normal){
     // one step update of the simulation of log_L
-    alglib::real_1d_array randomStep_;
+    alglib::real_1d_array randomStep_,L_;
     randomStep_.setlength(N);
-    get_RandomStep(randomStep_, 0.5, N);
+    get_RandomStep(randomStep_, 0.5, N, normal);
+    L_.setlength(N);
+    for(int i = 0; i < N; i++){
+        L_[i] = exp(log_L[i]);
+    }
 
     for(int i = 0; i < N; i++){
 
@@ -154,8 +147,6 @@ void one_Simulation(alglib::real_1d_array& log_L, alglib::real_1d_array& L_,algl
 }
 
 double get_MaxlogL(alglib::real_1d_array& log_L, int N){
-    // get maximum value in log_L for first test (43)
-    // optimal
     double max_ = log_L[0];
     for(int i = 1; i < N; i++){
         if (log_L[i] > max_) max_ = log_L[i];
@@ -165,21 +156,20 @@ double get_MaxlogL(alglib::real_1d_array& log_L, int N){
 
 bool first_Test(alglib::real_1d_array& log_L, int N, double sigma, double h, double R_up){
     // test defined by (43)
-    // optimal
     double log_L_max = get_MaxlogL(log_L, N);
     double log_L_hat = log_L_max + (sigma*sigma) * h * N - 0.5 * (sigma*sigma) * h + sigma * sqrt(h * N);
     if (log_L_hat < log(R_up)) return true;
     else return false;
 }
 
-bool second_Test(alglib::real_1d_array& log_L, alglib::real_1d_array& L, int N, double sigma, double h, double delta, double R_up){
+bool second_Test(alglib::real_1d_array& log_L, int N, double sigma, double h, double delta, double R_up){
     // test defined by (44)
-    alglib::real_1d_array L_;
-    L_.setlength(N);
+    alglib::real_1d_array log_L_;
+    log_L_.setlength(N);
     for(int i = 0; i < N; i++){
-        L_[i] = L[i] * (1 + (i+1) * sigma * sigma * h + sigma * sqrt((N-i) * h));
+        log_L_[i] = log(exp(log_L[i]) * (1 + (i+1) * sigma * sigma * h + sigma * sqrt((N-i) * h)));
     }
-    double r_swap = R_Swap(L_, delta, N, false);
+    double r_swap = R_Swap(log_L_, delta, N);
     if (r_swap < R_up) return true;
     else return false;
 }
@@ -259,49 +249,34 @@ alglib::real_1d_array projection(alglib::real_1d_array& proj_x, void (*fvec)(con
     return proj_x;
 }
 
-// void simulation(alglib::real_1d_array& log_L ,alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording){
-//     std::ofstream record("record_trajectoire.txt");
-//     for(int i = 0; i < itr; i++){
-//         double timeStamp = i * T0 / itr;  
-//         if(is_Recording) record_logL(log_L, N, timeStamp, record);
-//         one_Simulation(log_L, U, Rho, delta, sigma, h, N);
-//     }
-//     record.close();
-//     return;
-// }
+void simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double delta, double sigma, double h, int N, double T0,int itr, bool is_Recording){
+    std::ofstream record("record_trajectoire.txt");
+    for(int i = 0; i < itr; i++){
+        double timeStamp = i * T0 / itr;  
+        if(is_Recording) record_logL(log_L, N, timeStamp, record);
+        one_Simulation(log_L, U, Rho, delta, sigma, h, N);
+    }
+    record.close();
+    return;
+}
 
-outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording){
+outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal){
     double timeStamp = 0;
-    int projection_num = 0;
-    double duration = 0;
     for(int i = 0; i < itr; i++){
         timeStamp = (i+1) * T0 / itr;
-        // prepare Libor so that we don't need to recalculate each time
-        alglib::real_1d_array L;
-        L.setlength(N);
-        for(int i = 0; i < N; i++){
-            L[i] = exp(log_L[i]);
-        }
-
         if(first_Test(log_L, N, sigma, h, R_up)){
-            one_Simulation(log_L, L ,U, Rho, delta, sigma, h, N);
+            one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
         }else{
-            if(second_Test(log_L, L, N, sigma, h, delta, R_up)){
-                one_Simulation(log_L, L, U, Rho, delta, sigma, h, N);
+            if(second_Test(log_L, N, sigma, h, delta, R_up)){
+                one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
             }else{
-                projection_num ++;
                 alglib::real_1d_array proj_x;
                 proj_x.setlength(N);
                 for(int i = 0; i < N; i++){
-                    proj_x[i] = -3.0;
+                    proj_x[i] = -3.0;// initial condition of the optimization algorithm
                 }
                 struct args arg = {N, R_up, delta, log_L ,get_log_L0};
-
-                auto start = std::chrono::high_resolution_clock::now();
                 alglib::real_1d_array proj_logL = projection(proj_x, fonction_fvec, &arg);
-                auto end = std::chrono::high_resolution_clock::now();
-                duration = duration + std::chrono::duration_cast<std::chrono::microseconds>(end-start).count() / 1000000.0;
-                
                 double norm = get_Norm(proj_logL, log_L, N);
                 double p = get_p(norm, N, h, sigma);
                 if(get_Bern(p)<0){
@@ -309,16 +284,75 @@ outCome real_simulation(alglib::real_1d_array& log_L, alglib::real_2d_array& U, 
                 }
                 else{
                     jump_Back(log_L, proj_logL, N, h, sigma);
-                    for(int i = 0; i < N; i++){
-                        L[i] = exp(log_L[i]);
-                    }
-                    one_Simulation(log_L, L, U, Rho, delta, sigma, h, N);
+                    one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
                 }
             }
         }
     }
     if(is_Recording) record_logL(log_L, N, timeStamp, record);
-    outCome result = {projection_num, duration , timeStamp, log_L};
+    outCome result = {timeStamp, log_L};
+    return result;
+}
+
+
+outCome real_simulation_simple_MC(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal){
+    double timeStamp = 0;
+    for(int i = 0; i < itr; i++){
+        timeStamp = (i+1) * T0 / itr;
+        one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+        double r_swap = R_Swap(log_L, delta, N);
+        if(r_swap > R_up) break;
+    }
+    if(is_Recording) record_logL(log_L, N, timeStamp, record);
+    outCome result = {timeStamp, log_L};
+    return result;
+}
+
+outCome real_simulation_MCB(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal){
+    double timeStamp = 0;
+    for(int i = 0; i < itr; i++){
+        timeStamp = (i+1) * T0 / itr;
+        if(first_Test(log_L, N, sigma, h, R_up)){
+            one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+        }else{
+            if(second_Test(log_L, N, sigma, h, delta, R_up)){
+                one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+            }else{
+                alglib::real_1d_array proj_x;
+                proj_x.setlength(N);
+                for(int i = 0; i < N; i++){
+                    proj_x[i] = -3.0;// initial condition of the optimization algorithm
+                }
+                struct args arg = {N, R_up, delta, log_L ,get_log_L0};
+                alglib::real_1d_array proj_logL = projection(proj_x, fonction_fvec, &arg);
+                double norm = get_Norm(proj_logL, log_L, N);
+                double p = exp(-2 * norm * norm / (sigma * sigma * h));
+                if(get_Bern(p) < 0) break;
+                else one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+            }
+        }
+    }
+    if(is_Recording) record_logL(log_L, N,timeStamp, record);
+    outCome result = {timeStamp, log_L};
+    return result;
+}
+
+outCome real_simulation_without_projection(alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, int itr, std::ofstream& record, bool is_Recording, bool normal){
+    double timeStamp = 0;
+    for(int i = 0; i < itr; i++){
+        timeStamp = (i+1) * T0 / itr;
+        if(first_Test(log_L, N, sigma, h, R_up)){
+            one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+        }else{
+            if(second_Test(log_L, N, sigma, h, delta, R_up)){
+                one_Simulation(log_L, U, Rho, delta, sigma, h, N, normal);
+            }else{
+                break;
+            }
+        }
+    }
+    if(is_Recording) record_logL(log_L, N, timeStamp, record);
+    outCome result = {timeStamp, log_L};
     return result;
 }
 
@@ -338,7 +372,7 @@ alglib::real_1d_array get_zeroCoupon(alglib::real_1d_array& log_L, int N, double
 double get_Price(alglib::real_1d_array& zeroCoupon, double Rswap, double K, double delta, int N){
     double price = delta * (Rswap - K);
     if(price <= 0){
-        return 0;
+        return price;
     }
     double coupon = 0;
     for(int i = 0; i < N; i++){
@@ -347,12 +381,10 @@ double get_Price(alglib::real_1d_array& zeroCoupon, double Rswap, double K, doub
     return (price * coupon);
 }
 
-void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, bool is_Recording){
+void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, bool is_Recording, bool normal){
     int itr = (int) T0 / h;
     double exit_Time = 0;
     double price = 0;
-    int projection_num = 0;
-    double projection_time = 0;
     int n = 0;
     for(int i = 0; i < num_simulation; i++){
         //each simulation set the begining point at log_L
@@ -361,17 +393,15 @@ void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_
         for(int j = 0; j < N; j++){
             log_L_[j] = log_L[j];
         }
-        outCome result = real_simulation(log_L_, U, Rho, R_up, delta, sigma, h, N, T0, itr, record, false);
+        outCome result = real_simulation(log_L_, U, Rho, R_up, delta, sigma, h, N, T0, itr, record, false,normal);
         double time = result.timeStamp;
-        projection_num += result.projection_num;
-        projection_time += result.projection_time;
         if (time < T0){
             exit_Time += time;
             record << time << " " << "0" << std::endl;
         }else{
             exit_Time += time;
             double Rswap = R_Swap(result.logL, delta, N);
-            if(isnan(Rswap)){
+            if(std::isnan(Rswap)){
                 n++;
                 continue;
             }
@@ -386,9 +416,44 @@ void monte_carlo(int num_simulation, alglib::real_1d_array& log_L, alglib::real_
     std::cout <<"mean exit time : " << mean_exitTime << std::endl;
     std::cout <<"price : " << mean_price << std::endl;
     std::cout <<"invalid simulation number : "<< n << std::endl;
-    std::cout <<"projection number : " << projection_num << std::endl;
-    std::cout <<"projection time : " << projection_time << std::endl;
-    return;
+}
+
+void monte_carlo_func(int num_simulation, alglib::real_1d_array& log_L, alglib::real_2d_array& U, alglib::real_2d_array& Rho, double R_up, double delta, double sigma, double h, int N, double T0, double actualisation, double K, std::ofstream& record, outCome (*simu) (alglib::real_1d_array&, alglib::real_2d_array&, alglib::real_2d_array&, double, double, double, double, int, double, int, std::ofstream&, bool, bool),bool is_Recording, bool normal){
+    int itr = (int) T0 / h;
+    double exit_Time = 0;
+    double price = 0;
+    int n = 0;
+    for(int i = 0; i < num_simulation; i++){
+        //each simulation set the begining point at log_Ltd
+        //if(i%10000==0) std::cout << i/10000 << "%" <<std::endl;
+        alglib::real_1d_array log_L_;
+        log_L_.setlength(N);
+        for(int j = 0; j < N; j++){
+            log_L_[j] = log_L[j];
+        }
+        outCome result = simu(log_L_, U, Rho, R_up, delta, sigma, h, N, T0, itr, record, false, normal);
+        double time = result.timeStamp;
+        if (time < T0){
+            exit_Time += time;
+            record << time << " " << "0" << std::endl;
+        }else{
+            exit_Time += time;
+            double Rswap = R_Swap(result.logL, delta, N);
+            if(std::isnan(Rswap)){
+                n++;
+                continue;
+            }
+            alglib::real_1d_array zeroCoupon = get_zeroCoupon(result.logL, N, delta);
+            double price_ = actualisation * get_Price(zeroCoupon, Rswap, K, delta, N);
+            price = price + price_;
+            record << time << " " << price_ << std::endl;
+        }
+    }
+    double mean_exitTime = exit_Time / num_simulation;
+    double mean_price = price / num_simulation;
+    std::cout <<"mean exit time : " << mean_exitTime << std::endl;
+    std::cout <<"price : " << mean_price << std::endl;
+    std::cout <<"invalid simulation number : "<< n << std::endl;
 }
 
 void print_logL(alglib::real_1d_array& log_L, int N){
