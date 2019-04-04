@@ -8,8 +8,11 @@ Compilation command :
 g++ -I. -o swap.out *.cpp
 
 You will find three files written by us:
+
 swap_utils.h : head file 
+
 swap_utils.cpp : all functions need for the Barrier Swaption
+
 test_swap.cpp : main function for the Barrier Swaption
 
 
