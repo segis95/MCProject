@@ -9,43 +9,32 @@
 #include <device_functions.h>
 
 #include <cuda.h>
+#include "kernel.h"
 
 
+#define L 1000 //time step number
+#define M 10 // payment date number
+#define N 50 // space step number
 
 
-//#include <string>
-
-#define nt 15
-#define nk 6
-#define L 10 //time step number
-#define M 9 // payment date number
-#define N 10// space step number
-
-
-// read only variables in GPU defined by prof, used by local volatility
-__constant__  float Tg[nt];
-__constant__  float rg[nt];// interest rate, constant par morceaux
-__constant__  float Kg[nk];
-__constant__  float Cg[16 * (nt - 1)*(nk - 1)];
-
+// precision to compare with
 __constant__  float err_r = 1e-4;
 
-__constant__  float Kgmax = 5.52f;//250.f;
-__constant__  float Kgmin = 2.996f;// 20.f;
-__constant__  float K = 100.f; //4.605f;
-__constant__  int P1 = 3;
-__constant__  int P2 = 6;
-__constant__  float B = 4.7874f;//120.f;
+__constant__  float Kgmax = 5.52f;
+__constant__  float Kgmin = 2.996f;
+__constant__  float K = 100.f;
+__constant__  int P1 = 4;
+__constant__  int P2 = 7;
+__constant__  float B = 4.7874f;
 
-// we should define the maturity here 
-// since the interest rate defined in rg has max time about 3 years, so we define maturity as 3 years
-// so that in our simulation, all time steps has a defined interest rate
-__constant__  float TT = 3.f;// SER_c: might be a name collision error with array T
-__constant__  float delta_T = 3.f / 10;
+//maturity
+__constant__  float TT = 3.f;
+__constant__  float delta_T = 3.f / 1000;
 
-__constant__  float delta_X = (5.52f - 2.996f) / 10;//(log(Kgmax) - log(Kgmin)) / 100;// ATTENTION: X is log
+__constant__  float delta_X = (5.52f - 2.996f) / 50;
+
 // prefixed dates correspond to maturity T = 3
-__constant__  float T[M] = { 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7 };
+__constant__  float T[M] = { 0.03, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7 };
 
 __device__  bool is_synchronized[L];
 __device__  int synchro_count[L];
@@ -55,44 +44,13 @@ __device__  float Cs[M*(N - 1)];
 __device__  float Ys[M*N];
 __device__ float Zs[M*N];
 
-
-
-// variables on CPU defined by prof, used to transfer values from host to devices
-float *Cgc, *Kgc, *Tgc, *rgc;
-
-//
 bool *is_synchronized_c;
 int *synchro_count_c;
 float *Asc, *Bsc, *Csc, *Ysc, *Zsc;
 
-// Allocate all parameters for local volatility
-void VarMalloc()
-{
-	// variables used for local volatility
-	Kgc = (float *)calloc(nk, sizeof(float));
-	Tgc = (float *)calloc(nt, sizeof(float));
-	rgc = (float *)calloc(nt, sizeof(float));
-	Cgc = (float *)calloc(16 * (nk - 1)*(nt - 1), sizeof(float));
-
-	// variables used for solve_PDE kernel
-	is_synchronized_c = (bool *)calloc(L, sizeof(bool));
-	synchro_count_c = (int *)calloc(L, sizeof(int));
-
-	Asc = (float *)calloc(M * (N - 1), sizeof(float));
-	Bsc = (float *)calloc(M * N, sizeof(float));
-	Csc = (float *)calloc(M * (N - 1), sizeof(float));
-	Ysc = (float *)calloc(M * N, sizeof(float));
-	Zsc = (float *)calloc(M * N, sizeof(float));
-
-}
-
 // Free all parameters
 void FreeVar()
 {
-	free(Cgc);
-	free(Kgc);
-	free(Tgc);
-	free(rgc);
 	free(is_synchronized_c);
 	free(synchro_count_c);
 	free(Asc);
@@ -102,276 +60,53 @@ void FreeVar()
 	free(Zsc);
 }
 
-
+// auxiliary functions
 float Maxc(float X, float Y) {
 	return X < Y ? Y : X;
 }
-
-
-// Initialize all parameters
-void parameters()
-{
-	/*
-	int P1c = 2;
-	int P2c = 7;
-	float Kgminc = 2.996f;//20.f;
-	float Kc =  30.f;//3.4011f;
-	float delta_Xc = (5.52f - 2.996f) / 10.0f;// need to be changed!!!!!!!!!!!!!!when N change
-	// initialization all parameters for PDE_solver
-	for (int i = 0; i < L; i++) {
-		is_synchronized_c[i] = false;
-	}
-	is_synchronized_c[L - 1] = true;
-	for (int i = 0; i < L; i++) {
-		synchro_count_c[i] = 0;
-	}
-	for (int i = 0; i < M*N; i++) {
-		Bsc[i] = 0.f;
-		Ysc[i] = 0.f;
-	}
-	// initialization all Z to terminal condition
-	for (int i = 0; i < N; i++) {
-		for (int j = 0; j < M; j++) {
-			if (j < P1c || j > P2c) {
-				Zsc[i + j * N] = 0.f;
-			}
-			else {
-				float x = Kgminc + i * delta_Xc;
-				//printf("hello\n");
-				Zsc[i + j * N] = Maxc(exp(x) - Kc, 0.f);
-				//printf("ZSC: %d %f\n", i + j * N, Zsc[i + j * N]);
-			}
-		}
-	}
-	for (int i = 0; i < M*(N - 1); i++) {
-		Asc[i] = 0.f;
-		Csc[i] = 0.f;
-	}
-
-	cudaError_t cudaStatus;
-	
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "is_synchronized");
-	cudaMemcpyToSymbol(is_synchronized, is_synchronized_c, L * sizeof(bool),0, cudaMemcpyHostToDevice);
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "synchro_count");
-	cudaMemcpyToSymbol(synchro_count, synchro_count_c, L * sizeof(int),0, cudaMemcpyHostToDevice);
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "As");
-	cudaMemcpyToSymbol(As, Asc, M*(N - 1) * sizeof(float),0, cudaMemcpyHostToDevice);
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "Cs");
-	cudaMemcpyToSymbol(Cs, Csc, M*(N - 1) * sizeof(float),0, cudaMemcpyHostToDevice);
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "Bs");
-	cudaMemcpyToSymbol(Bs, Bsc, M*N * sizeof(float),0, cudaMemcpyHostToDevice);
-
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "Ys");
-	cudaMemcpyToSymbol(Ys, Ysc, M*N * sizeof(float),0, cudaMemcpyHostToDevice);
-	
-	//cudaStatus = cudaGetSymbolAddress(&d_data, "Zs");
-	cudaStatus = cudaMemcpyToSymbol(Zs, Zsc, M*N * sizeof(float),0, cudaMemcpyHostToDevice);
-
-	*/
-
-	// initialization for local volatility by prof
-	Kgc[0] = 20.f;
-	Kgc[1] = 70.f;
-	Kgc[2] = 120.f;
-	Kgc[3] = 160.f;
-	Kgc[4] = 200.f;
-	Kgc[5] = 250.0f;
-
-	float d, w, m, y;
-	d = 1.0f / 360.0f;
-	w = 7.0f * d;
-	m = 30.0f * d;
-	y = 12.0f * m;
-
-	Tgc[0] = d;
-	Tgc[1] = 2.f*d;
-	Tgc[2] = w;
-	Tgc[3] = 2.f*w;
-	Tgc[4] = m;
-	Tgc[5] = 2.f*m;
-	Tgc[6] = 3.f*m;
-	Tgc[7] = 6.f*m;
-	Tgc[8] = y;
-	Tgc[9] = y + 3.f*m;
-	Tgc[10] = y + 6.f*m;
-	Tgc[11] = 2.f*y;
-	Tgc[12] = 2.f*y + 6.f*m;
-	Tgc[13] = 3.f*y;
-	Tgc[14] = 3.f*y + 6.f*m;
-
-	rgc[0] = 0.05f;
-	rgc[1] = 0.07f;
-	rgc[2] = 0.08f;
-	rgc[3] = 0.06f;
-	rgc[4] = 0.07f;
-	rgc[5] = 0.1f;
-	rgc[6] = 0.11f;
-	rgc[7] = 0.13f;
-	rgc[8] = 0.12f;
-	rgc[9] = 0.14f;
-	rgc[10] = 0.145f;
-	rgc[11] = 0.14f;
-	rgc[12] = 0.135f;
-	rgc[13] = 0.13f;
-	rgc[14] = 0.f*y;
-
-	int k;
-	FILE *ParFp;
-	std::string TmpString;
-	//Spline Volatility parameters------------------------------
-	// - Read values from input file on CPU
-	TmpString = "Cg.txt";
-	ParFp = fopen(TmpString.c_str(), "r");
-	if (ParFp == NULL) {
-		fprintf(stderr, "File '%s' unreachable!\n", TmpString.c_str());
-		exit(EXIT_FAILURE);
-	}
-	// - Store values in input data tables on CPU
-	for (k = 0; k < 1120; k++) {
-		if (fscanf(ParFp, "%f", &Cgc[k]) <= 0) {
-			fprintf(stderr, "Error while reading file '%s'!\n", TmpString.c_str());
-			exit(EXIT_FAILURE);
-		}
-	}
-	fclose(ParFp);
-
-
-	cudaMemcpyToSymbol(Kg, Kgc, nk * sizeof(float));
-	cudaMemcpyToSymbol(Tg, Tgc, nt * sizeof(float));
-	cudaMemcpyToSymbol(rg, rgc, nt * sizeof(float));
-	cudaMemcpyToSymbol(Cg, Cgc, 16 * (nt - 1)*(nk - 1) * sizeof(float));
-}
-
-// Time index  (by prof)
-__device__ int timeIdx(float t) {
-	int i, I;
-	for (i = 14; i >= 0; i--) {
-		if (t < Tg[i]) {
-			I = i;
-		}
-	}
-	return I;
-}
-
-// Interest rate time integral (by prof)
-__device__ float rt_int(float t, float T, int i, int j)
-{
-	float res;
-	int k;
-	if (i == j) {
-		res = (T - t)*rg[i];
-	}
-	else {
-		res = (T - Tg[j - 1])*rg[j] + (Tg[i] - t)*rg[i];
-		for (k = i + 1; k < j; k++) {
-			res += (Tg[k] - Tg[k - 1])*rg[k];
-		}
-	}
-
-	return res;
-}
-
-// Monomials till third degree (by prof)
-__device__ float mon(float x, int i) { return 1.0f*(i == 0) + x * (i == 1) + x * x*(i == 2) + x * x*x*(i == 3); }
-
-// Local volatility from bicubic interpolation of implied volatility (by prof)
-__device__ void vol_d(float x, float x0, float t, float *V, int q) {
-
-	float u1 = 0.0f;
-	float u2 = 0.0f;
-	float d1, d2, d_1;
-	float y = 0.0f;
-	float y_1 = 0.0f, y_2 = 0.0f, y_22 = 0.0f;
-	int k = 0;
-
-
-	if (x >= Kg[5]) {
-		k = 4;
-		d2 = 1.0f / (Kg[k + 1] - Kg[k]);
-		u2 = 1.0f;
-	}
-	else {
-		if (x <= Kg[0]) {
-			k = 0;
-			d2 = 1.0f / (Kg[k + 1] - Kg[k]);
-			u2 = 1.0f;
-		}
-		else {
-			while (Kg[k + 1] < x) {
-				k++;
-			}
-			d2 = 1.0f / (Kg[k + 1] - Kg[k]);
-			u2 = (x - Kg[k]) / (Kg[k + 1] - Kg[k]);
-		}
-	}
-
-	d1 = 1.0f / (Tg[q + 1] - Tg[q]);
-	u1 = (t - Tg[q]) / (Tg[q + 1] - Tg[q]);
-
-	for (int i = 0; i < 4; i++) {
-		for (int j = 0; j < 4; j++) {
-			y += Cg[k * 14 * 16 + q * 16 + j + i * 4] * mon(u1, i)*mon(u2, j);
-			y_1 += i * Cg[k * 14 * 16 + q * 16 + i * 4 + j] * mon(u1, i - 1)*mon(u2, j)*d1;
-			y_2 += j * Cg[k * 14 * 16 + q * 16 + i * 4 + j] * mon(u1, i)*mon(u2, j - 1)*d2;
-			y_22 += j * (j - 1)*Cg[k * 14 * 16 + q * 16 + i * 4 + j] * mon(u1, i)*mon(u2, j - 2)*d2*d2;
-		}
-	}
-	d_1 = (logf(x0 / x) + rt_int(0.0f, t, 0, q)) / (y*sqrtf(t)) + 0.5f*y*sqrtf(t);
-	u1 = x * x*(y_22 - d_1 * sqrtf(t)*y_2*y_2 + (1.0f / y)*((1.0f / (x*sqrtf(t)))
-		+ d_1 * y_2)*((1.0f / (x*sqrtf(t))) + d_1 * y_2));
-	u2 = 2.0f*y_1 + y / t + 2.0f*x*rg[q] * y_2;
-
-	*V = sqrtf(fminf(fmaxf(u2 / u1, 0.0001f), 0.5f));
-}
-
 
 __device__ float Max(float X, float Y) {
 	return X < Y ? Y : X;
 }
 
-// SER_c: we need a more intelligent way to compare les reals
-// otherwise it'll not work if we do need to check the identity
 __device__ bool equal(float x, float y) {
 	return abs(x - y) < err_r;
 }
 
-
-// function to get interest rate which is in rgc defined by prof
+// r_g : we do not implement!
 __device__ float get_rgc() {
-	// we should use Rgc table to get the real interest rate, however the way that the prof presents it is too complicated for 
-	// extracting interest rate, we set it to zero for the moment
 	return 0.f;
 }
 
+// returns between which two moments from T tStep is
+__device__ int which_slot(int tStep) {
+	float t = tStep * delta_T;
+	int slot = M;
+	for (int i = M-1; i >= 0; i--) {
+		if (t < T[i]) {
+			slot = i;
+		}
+	}
+	return slot ;
+}
 
-// function help Ys to decide which update schema to use
+// defines the Scema for updation Ys
 __device__ int which_Schema(int tStep) {
 	float t = tStep * delta_T;
-	//printf("%f",t);
 	if (equal(t, T[M - 1])) {
-		return 1;// use eq before 10
+		return 1;
 	}
 	else {
 		for (int k = 2; k <= M - 1; k++) {
 			if (equal(t, T[M - k])) {
-				return k;// use eq(10) k stands for the k + 1 in eq(10)
-				// ATTENTION: the index of T[] starts from 1 in the definition of the prof while here it starts from 0
+				return k;
 			}
 		}
-		return 0;// normal 
+		return 0;// "normal" 
 	}
-
 }
 
 __device__ float One_Zero(float S, float B, bool up) {
-	// play the role of indicatrice in (10) and eq before (10)
-	// up means all values >= B are kept, vice versa
-	// SER_c: this is not what we want here...
 	if (up) {
 		return S < B ? 0.f : 1.f;
 	}
@@ -381,68 +116,37 @@ __device__ float One_Zero(float S, float B, bool up) {
 }
 
 // update Ys by Schema0 (which means E[(S_T - K)_+|S_t])
+__device__ void Update_by_Schema0(int tStep) {
 
-__device__ void Update_by_Schema0() {
-
-	printf("Hello Schema 0\n");
 	int idx = threadIdx.x + (blockIdx.x - 1) * N; 
-
-
-
-	// SER_c: don't we need to multiply the second term by N? 
-
-	//printf("%f\n", As[15]); // this works
-	//printf("%d\n", idx);
-
-	//************************************TO_CHECK*****************************
-	/*
-	if (blockIdx.x - 1 > P2 || blockIdx.x - 1 < P1) {
-		//printf("hello\n");
+	int slot = which_slot(tStep);
+	int p_inf = P2 < slot ? P2 : slot;
+	
+	if (blockIdx.x - 1  + (M - slot)   <  P1 || blockIdx.x - 1 > p_inf) {
 		Ys[idx] = 0.0;
-		
-		return; // SER_c: we stop
+		return;
 	}
-	*/
-	//************************************END TO CHECK**************************
 
-	//printf("%f\n", As[15]); // this doesn't work
-
-
-	float x = Kgmin + threadIdx.x * delta_X; // SER_c : was not defined before
-	//printf("%f\n", As[15]);
-	// SER_c : here might be a problem because of precision
-	// so we need to leave a gap; for our setup delta_x is 2.5e-2 and we can 
-	// hope that an error of 1e-4 is enough
-	// we do not come until log(Kgmax): we stop just before
-	// log(Kgmin) + (N - 1) * delta != log(Kgmax)
+	float x = Kgmin + threadIdx.x * delta_X; 
 
 	if (x >= Kgmax - delta_X - err_r) {
-		// upper boundary
-		float pmax = exp(Kgmax) - K;// M_1
-		// when touches upper boundary, Cs[idx+1] is set to be Cs[idx]
-		// SER_c:  we need to use Bs and Cs too
-
+		float pmax = exp(Kgmax) - K;
 		Ys[idx] = -As[idx - 1] * Zs[idx - 1] + (2 - Bs[idx]) * Zs[idx] + (-Cs[idx]) * pmax;
 	}
 	else {
-		if (x <= Kgmin + err_r) { // SER_c: Again we add a gap
-			// lower boundary
+		if (x <= Kgmin + err_r) {
 			float pmin = 0;
 			Ys[idx] = -As[idx] * pmin + (2 - Bs[idx]) * Zs[idx] + (-Cs[idx + 1]) * Zs[idx + 1];
 		}
 		else {
-			// in the middle
 			Ys[idx] = -As[idx - 1] * Zs[idx - 1] + (2 - Bs[idx]) * Zs[idx] + (-Cs[idx + 1]) * Zs[idx + 1];
 		}
 
 	}
-	//printf("idx of Y: %d,  Ys: %f\n", idx, Ys[idx]);
 	return;
 }
-
-// update Ys by Schema1 (which means just with indicatrice, not the one with the sum two indicatrice
 __device__ void Update_by_Schema1(bool up) {
-	printf("Hello Schema 1\n");
+	//printf("Hello Schema 1\n");
 
 	int idx = threadIdx.x + (blockIdx.x - 1) * N; // SER_c
 	float x = Kgmin + threadIdx.x * delta_X; // SER_c
@@ -485,39 +189,29 @@ __device__ void Update_by_Schema1(bool up) {
 	return;
 }
 
-// update Ys by Schema3 (which means the one in eq(10) with the sum of two indicatrice
-__device__ void Update_by_Schema2(int k, int cut) {
-
-	printf("Hello Schema 2\n");
+__device__ void Update_by_Schema2(int tStep) {
 
 	int idx_this_j = threadIdx.x + (blockIdx.x - 1) * N;
 	int idx_next_j = threadIdx.x + (blockIdx.x) * N;
 
-	// SER_c: don't we need to multiply the second term by N? 
-	
-	//**********************************TO_CHECK!!!*****************************
-	
-	int P_inf = P2 > M - k + 1 ? M - k + 1 : P2;
-	//if (blockIdx.x > P_inf + 1 || blockIdx.x < P1-k+1) {
-	//	Ys[idx_this_j] = 0.0;
-	//	return; // SER_c: we stop
-	//}
 
-	//**********************************END_TO_CHECK!!!**************************
+	int slot = which_slot(tStep);
+	int p_inf = P2 < slot ? P2 : slot;
+	
+	if (blockIdx.x - 1 + (M - slot) < P1 || blockIdx.x - 1 > p_inf) {
+		Ys[idx_this_j] = 0.0;
+		return;
+	}
 
 	float x = Kgmin + threadIdx.x * delta_X;
 
 	if (x >= Kgmax - delta_X - err_r) {
-		// upper boundary
-		float pmax = exp(Kgmax) - K;//M_3
-		// when touches upper boundary, As[idx+1] is set to be As[idx]
-		// SER_c: As, Bs, Cs // also modified
+		float pmax = exp(Kgmax) - K;
 
-		// SER_c: I-st part Id(S_T >= B)
 		Ys[idx_this_j] = -As[idx_this_j - 1] * Zs[idx_this_j - 1] * One_Zero(x - delta_X, B, true) + \
 			(2 - Bs[idx_this_j]) * Zs[idx_this_j] * One_Zero(x, B, true) + \
 			(-Cs[idx_this_j + 1]) * pmax * One_Zero(x + delta_X, B, true) + \
-			// SER_c: II-nd part Id(S_T < B)
+
 			- As[idx_next_j - 1] * Zs[idx_next_j - 1] * One_Zero(x - delta_X, B, false) + \
 			(2 - Bs[idx_next_j]) * Zs[idx_next_j] * One_Zero(x, B, false) + \
 			(-Cs[idx_next_j + 1]) * pmax * One_Zero(x + delta_X, B, false);
@@ -525,36 +219,29 @@ __device__ void Update_by_Schema2(int k, int cut) {
 
 	else {
 		if (x <= Kgmin + err_r) {
-			// lower boundary
+
 			float pmin = 0;
-			// SER_c: I-st part Id(S_T >= B)
+
 			Ys[idx_this_j] = -As[idx_this_j - 1] * pmin * One_Zero(x - delta_X, B, true) + \
 				(2 - Bs[idx_this_j]) * Zs[idx_this_j] * One_Zero(x, B, true) + \
 				(-Cs[idx_this_j + 1]) * Zs[idx_this_j + 1] * One_Zero(x + delta_X, B, true) + \
-				// SER_c: II-nd part Id(S_T < B)
+
 				- As[idx_next_j - 1] * pmin * One_Zero(x - delta_X, B, false) + \
 				(2 - Bs[idx_next_j]) * Zs[idx_next_j] * One_Zero(x, B, false) + \
 				(-Cs[idx_next_j + 1]) * Zs[idx_next_j + 1] * One_Zero(x + delta_X, B, false);
 		}
 
 		else {
-			// SER_c: General case: in the middle
 
-			// SER_c: I-st part Id(S_T >= B)
 			Ys[idx_this_j] = -As[idx_this_j - 1] * Zs[idx_this_j - 1] * One_Zero(x - delta_X, B, true) + \
 				(2 - Bs[idx_this_j]) * Zs[idx_this_j] * One_Zero(x, B, true) + \
 				(-Cs[idx_this_j + 1]) * Zs[idx_this_j + 1] * One_Zero(x + delta_X, B, true) + \
-				// SER_c: II-nd part Id(S_T < B)
+				
 				- As[idx_next_j - 1] * Zs[idx_next_j - 1] * One_Zero(x - delta_X, B, false) + \
 				(2 - Bs[idx_next_j]) * Zs[idx_next_j] * One_Zero(x, B, false) + \
 				(-Cs[idx_next_j + 1]) * Zs[idx_next_j + 1] * One_Zero(x + delta_X, B, false);
-
 		}
-
-
 	}
-
-	//printf("idx of Y: %d,  Ys: %f\n", idx_this_j, Ys[idx_this_j]);
 
 	return;
 }
@@ -577,7 +264,7 @@ __device__ void Update_Ys(int tStep, int NN) {
 	int schema = which_Schema(tStep);
 
 	if (schema == 0) {
-		Update_by_Schema0();
+		Update_by_Schema0(tStep);
 		
 	}
 	if (schema == 1) {
@@ -589,7 +276,7 @@ __device__ void Update_Ys(int tStep, int NN) {
 			Update_by_Schema1(up);
 		}
 		else {
-			Update_by_Schema0(); // SER_c: it was 1 but we use the standard dynamic
+			Update_by_Schema0(tStep); // SER_c: it was 1 but we use the standard dynamic
 		}
 	}
 	if (schema >= 2) {
@@ -604,7 +291,7 @@ __device__ void Update_Ys(int tStep, int NN) {
 		}
 		else {
 			///int Pk = Max(P1 - k + 1, 0);
-			Update_by_Schema2(schema, Pk - 1);
+			Update_by_Schema2(tStep);
 		//*******************END TO CHECK************************
 		}
 	}
@@ -613,153 +300,151 @@ __device__ void Update_Ys(int tStep, int NN) {
 
 __device__ void Update_As(int tStep, int NN) {
 	int idx = threadIdx.x + (blockIdx.x - 1) * NN;
-	//printf("%f\n", As[15]);
-	// only when threadIdx.x < dimension of As do update, other threads do nothing
 	if (threadIdx.x < NN - 1) {
-		// set vol constant for test, since I'm not sure how to use functiong vol_d,
-		// we could decomment de vol_d line to get local volatility
 		float sigma = 0.2;
-		//float x = Kgmin + delta_X * (threadIdx.x + 1);
-		
-		// vol_d(x,x0,t,&sigma,q);
-		float miu = get_rgc() - sigma;
+		float miu = get_rgc() - sigma * sigma / 2;
 		As[idx] = -(sigma * sigma * delta_T) / (4 * delta_X * delta_X) - miu * delta_T / (4 * delta_X);
 	}
 }
 
 __device__ void Update_Bs(int tStep, int NN) {
 	int idx = threadIdx.x + (blockIdx.x - 1) * NN;
-	// only when threadIdx.x < dimension of Bs do update, other threads do nothing
-	if (threadIdx.x < NN) { // SER_c: collision N and NN
+	if (threadIdx.x < NN) {
 		float sigma = 0.2;
-		//float x = Kgmin + delta_X * threadIdx.x;
-		// vol_d(x,x0,t,&sigma,q);
 		Bs[idx] = 1 + (sigma * sigma * delta_T) / (2 * delta_X * delta_X);
 	}
 }
 
 __device__ void Update_Cs(int tStep, int NN) {
 	int idx = threadIdx.x + (blockIdx.x - 1) * NN;
-	// only when threadIdx.x < dimension of Cs do update, other threads do nothing
-	if (threadIdx.x < NN - 1) { // SER_c: collision N and NN
+	if (threadIdx.x < NN - 1) { 
 		float sigma = 0.2;
-		//float x = Kgmin + delta_X * threadIdx.x;
-		// vol_d(x,x0,t,&sigma,q);
-		float miu = get_rgc() - sigma;
+
+		float miu = get_rgc() - sigma * sigma / 2;
 		Cs[idx] = -(sigma * sigma * delta_T) / (4 * delta_X * delta_X) + miu * delta_T / (4 * delta_X);
 	}
 }
 
-__device__ void Thomas_Solver(int tStep) { // SER_c: do we really need it here?, int N
-	// Thomas algorithm to solve the triangular system
-	// N : size of the matrix
-	// As,Bs,Cs,Ys,Zs are in the global memory of GPU which can be accessed by all threads in all block
-	// blockIdx.x corresponds to the index j in eq(10)
-
-	// since block zero works only on verifying synchronization, the blockIdx.x in Thomas_Solver starts
-	// from 1, that's why we have (blockIdx.x - 1) here
-
-
+// Tridiagonal systems solver
+__device__ void Thomas_Solver(int tStep) { 
 
 	if (threadIdx.x == 0) {
-		int idx = threadIdx.x + N * (blockIdx.x - 1);
-		
-		//printf("%f\n", Bs[idx]);
-		
+		int idx = threadIdx.x + N * (blockIdx.x - 1);		
 		Cs[idx] = Cs[idx] / Bs[idx];
 		Ys[idx] = Ys[idx] / Bs[idx];
-
-		//for (int i = 1; i < N - 1; i++) {
-		//	printf("block: %d, thread: %d, Z: %f\n", blockIdx.x, threadIdx.x, Zs[idx + i]);
-		//}
 
 		//only the thread 0 of each block solves the system by Thomas, since Thomas is sequential algorithm
 		for (int i = 1; i < N - 1; i++) {
 			Cs[idx + i] = Cs[idx + i] / (Bs[idx + i] - As[idx + i - 1] * Cs[idx + i - 1]);
 		}
 
-		for (int i = 1; i < N; i++) { // SER_c: was an error M -> N
+		for (int i = 1; i < N; i++) { 
 			Ys[idx + i] = (Ys[idx + i] - As[idx + i - 1] * Ys[idx + i - 1]) / (Bs[idx + i] - As[idx + i - 1] * Cs[idx + i - 1]);
 		}
 
 		Zs[idx + N - 1] = Ys[idx + N - 1];
 
-		//int i;
-
 		for (int i = N - 2; i > -1; i--) {
 			Zs[idx + i] = Ys[idx + i] - Cs[idx + i] * Zs[idx + i + 1];
 		}
-
-		// test if anything has been changed
-		//for (int i = N -2 ; i > -1; i--){
-		//	Zs[idx + i] = 0.f;
-		//}
-
-		//for (int i = 1; i < N - 1; i++) {
-		//	printf("block: %d, thread: %d, Z: %f\n", blockIdx.x, threadIdx.x, Zs[idx + i]);
-		//}
 		
 	}
 }
 
+// initializer of Bs, Ys, Zs, As, Cs, is_synchronized, synchro_count
 __device__ void init() {
 
-	
+	int P1c = 4;
+	int P2c = 7;
+	float Kgminc = 20.f;
+	float Kc = 100.f;
+	float delta_Xc = (5.52f - 2.996f) / N;
+
+	for (int i = 0; i < L; i++) {
+		is_synchronized[i] = false;
+	}
+	is_synchronized[L - 1] = true;
+	for (int i = 0; i < L; i++) {
+		synchro_count[i] = 0;
+	}
+	for (int i = 0; i < M*N; i++) {
+		Bs[i] = 0.f;
+		Ys[i] = 0.f;
+	}
+
+	for (int i = 0; i < N; i++) {
+		for (int j = 0; j < M; j++) {
+			if (j < P1c || j > P2c) {
+				Zs[i + j * N] = 0.f;
+			}
+			else {
+				float x = log(Kgminc) + i * delta_Xc;
+				Zs[i + j * N] = exp(x) - Kc > 0 ? exp(x) - Kc : 0.f;
+			}
+		}
+	}
+
+	for (int i = 0; i < M*(N - 1); i++) {
+		As[i] = 0.f;
+		Cs[i] = 0.f;
+	}
+
 	return;
 
 }
 
 // main kernel solves the whole problem
-__global__ void PDE_Solver() { // SER_c: de we really need int N here?
+__global__ void PDE_Solver() { 
 	// block zero is responsible for synchronization for other blocks
 	
+	init();
+	__syncthreads();
+
 	if (blockIdx.x == 0) {
 		// only the first thread in block zero is used, other threads do nothing
 		if (threadIdx.x == 0) {
-			//for (int i = 0; i < 10e5; i++);
 
+		// tracking the changes	of Zs		
+		for (int i = L - 1; i >= 0; i--) {
+			if ((L - 1 - i) % 50 == 0 )  {//&& (L - 1 - i) < 451 && (L - 1 - i) > 299
+				printf("step : %d \n\n", L - i - 1);
+				for (int ii = 0; ii < M; ii++) {
+					for (int jj = 0; jj < N; jj++) {
+						printf("%2.0f ", Zs[jj + N * ii]);
+					}
+					printf("\n");
+				}
+				printf("\n \n");
+			}
 
-			for (int i = L - 1; i >= 0; i--) {
-				printf("step : %d \n\n", L - i);
 				while (synchro_count[i] != M) {
 					// wait for all other blocks finishing calculation for time step t_i 
 				}
 				// once all other blocks have finished calculation, change the i-1'th synchronization state
 				// allows all other blocks continuing the t_i-1 time step work
-				is_synchronized[i - 1] = true;
-				
+				is_synchronized[i - 1] = true;	
 			}
 		}
-		//else if (threadIdx.x == 1) {
-		//	init();
-		//}
-
 	}
 	else {
 
-		//for (int i = 0; i < 10e5; i++);
-		//printf("\n hello1\n");
-		// *************** ATTENTION ***********************//
 		// Only block 1 to M do the work, so that we garantie the sum of sychro_count[i] == M
 		if ((blockIdx.x >= 1) && (blockIdx.x <= M)) {//(blockIdx.x >= 1) && (blockIdx.x < = M)
+		
 		// other blocks are responsible for calculation
 			for (int i = L - 1; i >= 0; i--) {
 				while (is_synchronized[i] != true) {
 					// wait for the time step i's state to be changed to true
 				}
-				
-				printf("thread: %d,  block: %d Zs: %f\n", threadIdx.x, blockIdx.x, Zs[threadIdx.x + N * (blockIdx.x - 1)]);
 
-				//if (blockIdx.x == 4) {
-				//	printf("Zs %d %f\n", threadIdx, Zs[threadIdx.x + (blockIdx.x - 1) * N]);
-				//}
-
-				//printf("%f\n", As[15]);//this works
 				if (threadIdx.x < N) {
 					Update_Ys(i, N); // SER_c:
 				}
 				
-				__syncthreads();// ATTENTION: all threads in the same block locked by __syncthreads until all threads arrive here
+				// ATTENTION: all threads in the same block locked by
+				// __syncthreads until all threads arrive here
+
+				__syncthreads();
 				if (threadIdx.x < N) {
 					Update_As(i, N);
 				}
@@ -776,17 +461,10 @@ __global__ void PDE_Solver() { // SER_c: de we really need int N here?
 				}
 				__syncthreads();
 
-				
-
-				
-				//printf("%f\n",Zs[ threadIdx.x + N * (blockIdx.x - 1)]);
-
 				if (threadIdx.x < N) {
 					Thomas_Solver(i);
 				}
 				__syncthreads();
-
-
 
 				// only the first thread has the right to write in synchro_count
 				// since all threads in the block ar synchronized, only the first thread writes
@@ -798,98 +476,29 @@ __global__ void PDE_Solver() { // SER_c: de we really need int N here?
 		}
 	}
 
+	
 	if (blockIdx.x == 0) {
-		// only the first thread in block zero is used, other threads do nothing
 		if (threadIdx.x == 0)
 		{
+			printf("result: \n");
 			for (int i = 0; i < M; i++) {
 				for (int j = 0; j < N; j++) {
-					printf("%f ", Zs[j + N * i]);
+					printf("%2.1f ", Zs[j + N * i]);
 				}
 				printf("\n");
 			}
 		}
 	}
+	
 }
-
-void print_result(float *res, int NN, int MM) {
-	for (int i = 0; i < MM; i++) {
-		for (int j = 0; j < NN; j++) {
-			;
-			//std::cout << res[j + N * i] << " ";
-		}
-		//std::cout << std::endl;
-	}
-}
-
 
 
 int main(int argc, char **argv) {
 
-
-
-	VarMalloc();
-
-	int P1c = 3;
-	int P2c = 6;
-	float Kgminc = 20.f;
-	float Kc = 100.f;
-	float delta_Xc = (5.52f - 2.996f) / 10;// need to be changed!!!!!!!!!!!!!!when N change
-	// initialization all parameters for PDE_solver
-	for (int i = 0; i < L; i++) {
-		is_synchronized_c[i] = false;
-	}
-	is_synchronized_c[L - 1] = true;
-	for (int i = 0; i < L; i++) {
-		synchro_count_c[i] = 0;
-	}
-	for (int i = 0; i < M*N; i++) {
-		Bsc[i] = 0.f;
-		Ysc[i] = 0.f;
-	}
-	// initialization all Z to terminal condition
-	for (int i = 0; i < N; i++) {
-		for (int j = 0; j < M; j++) {
-			if (j < P1c || j > P2c) {
-				Zsc[i + j * N] = 0.f;
-			}
-			else {
-				float x = log(Kgminc) + i * delta_Xc;
-				Zsc[i + j * N] = Maxc(exp(x) - Kc, 0.f);
-			}
-		}
-	}
-
-
-	for (int i = 0; i < M*(N - 1); i++) {
-		Asc[i] = 0.f;
-		Csc[i] = 0.f;
-	}
-
-	
-	cudaMemcpyToSymbol(is_synchronized, is_synchronized_c, L * sizeof(bool));
-	cudaMemcpyToSymbol(synchro_count, synchro_count_c, L * sizeof(int));
-	cudaMemcpyToSymbol(As, Asc, M*(N - 1) * sizeof(float));
-	cudaMemcpyToSymbol(Cs, Csc, M*(N - 1) * sizeof(float));
-	cudaMemcpyToSymbol(Bs, Bsc, M*N * sizeof(float));
-	cudaMemcpyToSymbol(Ys, Ysc, M*N * sizeof(float));
-	cudaMemcpyToSymbol(Zs, Zsc, M*N * sizeof(float));
-
-	//*************************************************************
-	//***********************************************
-
-
+	std::freopen("output.txt", "w", stdout);
 
 	float Tim;							// GPU timer instructions
 	cudaEvent_t start, stop;			// GPU timer instructions
-	
-
-	float* res;
-	res = (float *)malloc(M * N * sizeof(float));
-
-	//parameters();
-
-	//print_result(res,N,M); 
 
 	cudaEventCreate(&start);			// GPU timer instructions
 	cudaEventCreate(&stop);				// GPU timer instructions
@@ -897,18 +506,13 @@ int main(int argc, char **argv) {
 
 	PDE_Solver << <M + 1, N >> > ();
 
-
-
 	cudaEventRecord(stop, 0);			// GPU timer instructions
 	cudaEventSynchronize(stop);			// GPU timer instructions
 	cudaEventElapsedTime(&Tim,			// GPU timer instructions
-		start, stop);				// GPU timer instructions
+		start, stop);					// GPU timer instructions
 	cudaEventDestroy(start);			// GPU timer instructions
 	cudaEventDestroy(stop);				// GPU timer instructions
 
-	cudaMemcpy(res, Zs, M * N * sizeof(float), cudaMemcpyDeviceToHost);
-
-	print_result(res,N,M);
 
 	printf("Execution time %f ms\n", Tim);
 	FreeVar();
