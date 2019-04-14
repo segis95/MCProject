@@ -1,6 +1,18 @@
 # MCProject
 # Barrier Cap/Floor
 
+This part of the code was developped under Windows 10, using Visual Studio 2017(v141) and Windows SDK version 10.0.17763.0 
+
+Files:
+
+main.cpp: main function for Barrier Cap
+
+utils.cpp: contains all the necessary stuff and implementation of function
+
+utils.h: header file
+
+The code prints the results directly into console. If one needs to reduce the execution time, please change values of the variables num_sim and N in main.cpp 
+
 # Barrier Swaption
 ### Calculate Barrier Swaption by Monte-Carlo method
 Don't need to do anything, just go into the directory of Swaption then type the compilation command
@@ -9,7 +21,7 @@ g++ -I. -o swap.out *.cpp
 
 You will find three files written by us:
 
-swap_utils.h : head file 
+swap_utils.h : header file 
 
 swap_utils.cpp : all functions need for the Barrier Swaption
 
