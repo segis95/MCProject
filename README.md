@@ -11,7 +11,10 @@ utils.cpp: contains all the necessary stuff and implementation of function
 
 utils.h: header file
 
-The code prints the results directly into console. If one needs to reduce the execution time, please change values of the variables num_sim and N in main.cpp 
+The code prints the results directly into console.
+
+The complete time of execution may take upto 30 minutes.
+If one needs to reduce the execution time, please change values of the variables num_sim and N in main.cpp (e.g num_sim = 10000, N = 100)
 
 # Barrier Swaption
 ### Calculate Barrier Swaption by Monte-Carlo method
