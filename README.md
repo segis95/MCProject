@@ -1,7 +1,11 @@
 # MCProject
+
+The project contains two parts. Each part should be compiled and executed separetely. 
+
 # Barrier Cap/Floor
 
-This part of the code was developped under Windows 10, using Visual Studio 2017(v141) and Windows SDK version 10.0.17763.0 
+To compile: g++ -I. -o cap.out *.cpp
+TO launch: ./cap.out
 
 Files:
 
@@ -14,7 +18,7 @@ utils.h: header file
 The code prints the results directly into console.
 
 The complete time of execution may take upto 30 minutes.
-If one needs to reduce the execution time, please change values of the variables num_sim and N in main.cpp (e.g num_sim = 10000, N = 100)
+If one needs to reduce the execution time, please change values of the variables num_sim and N in main.cpp (e.g. num_sim = 10000, N = 100)
 
 # Barrier Swaption
 ### Calculate Barrier Swaption by Monte-Carlo method
