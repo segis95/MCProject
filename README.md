@@ -5,7 +5,8 @@ The project contains two parts. Each part should be compiled and executed separe
 # Barrier Cap/Floor
 
 To compile: g++ -I. -o cap.out *.cpp
-TO launch: ./cap.out
+
+To launch: ./cap.out
 
 Files:
 
