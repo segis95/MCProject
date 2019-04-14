@@ -22,7 +22,7 @@ int main()
 
 	double steps[] = { 0.05, 0.1, 0.125, 0.2, 0.25 };
 	std::cout << "Attention! Execution of the entire of this code may take upto 30 minutes! \n";
-	std::cout << "if you want to decrease the execution time please change the values of parameters num_sim and N\n\n";
+	std::cout << "if you want to decrease the execution time please change the values of parameters num_sim and N in main.cpp\n\n";
 	std::cout << "******RANDOM WALK APPROACH********\n\n";
 	
 	std::cout << "Number of simulations for caplets: " << num_sim << "\n\n";

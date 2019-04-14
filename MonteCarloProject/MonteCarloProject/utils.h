@@ -1,6 +1,6 @@
 #pragma once
 #include <random>
-#define M_SQRT1_2 sqrt(0.5)
+#define M_SQRT1_2_ sqrt(0.5)
 #define PI 3.141592653589793238463
 
 double d_p(double x, double v);

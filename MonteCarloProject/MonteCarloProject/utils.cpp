@@ -19,7 +19,7 @@ double d_m(double x, double v) {
 // cumulative distribution function
 // of normal distribution N(0,1)
 double cdf(double value) {
-	return 0.5 * erfc(-value * M_SQRT1_2);
+	return 0.5 * erfc(-value * M_SQRT1_2_);
 }
 
 // probability distribution function
