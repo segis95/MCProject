@@ -1,6 +1,6 @@
 # MCProject
 
-The project contains two parts. Each part should be compiled and executed separetely. 
+The project contains two parts. Each part should be compiled and executed separetely. The code reproduces results from the article: https://arxiv.org/abs/1211.5726
 
 # Barrier Cap/Floor
 
